@@ -21,5 +21,25 @@ export interface DesignTemplate {
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
-  imglyTemplate: any;
+  imglyTemplate?: any;
 }
+
+export interface CardDetails {
+  fullName: string;
+  email: string;
+  phone: string;
+  tagline: string;
+  website: string;
+  logoText: string;
+  city?: string;
+  province?: string;
+}
+
+export type SidebarTab =
+  | 'details'
+  | 'text'
+  | 'graphics'
+  | 'qrcode'
+  | 'colours'
+  | 'background'
+  | 'layers';
