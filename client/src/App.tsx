@@ -6,13 +6,14 @@ import { SidebarRail } from './components/SidebarRail';
 import { DetailsPanel } from './components/DetailsPanel';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { PreviewModal } from './components/PreviewModal';
-import { CardDetails, DesignTemplate, SidebarTab } from './types';
+import { CardDetails, DesignTemplate, PRODUCTS, SidebarTab } from './types';
 import { ensureFontLoaded, applyFontToActiveText } from './utils/fontLoader';
 
 export function App() {
   const [templates, setTemplates] = useState<DesignTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<DesignTemplate | null>(null);
-  const [activeTab, setActiveTab] = useState<SidebarTab>('details');
+  const [activeTab, setActiveTab] = useState<SidebarTab>('product');
+  const [selectedProductId, setSelectedProductId] = useState<string>('business-card');
   const [activeSide, setActiveSide] = useState<'front' | 'back'>('front');
 
   // Preview Modal state
@@ -121,6 +122,28 @@ export function App() {
     canvas.renderAll();
   };
 
+  const handleSelectProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    const prod = PRODUCTS.find((p) => p.id === productId);
+    if (prod) {
+      setSelectedTemplate((prev) => ({
+        id: prev?.id || prod.id,
+        slug: prod.id,
+        name: prod.name,
+        categoryId: prev?.categoryId || null,
+        countryCode: prev?.countryCode || null,
+        style: prev?.style || null,
+        widthPx: prod.widthPx,
+        heightPx: prod.heightPx,
+        dpi: 300,
+        polotnoJson: null,
+        editableVariables: null,
+        isSystemTemplate: true,
+        isActive: true,
+      }));
+    }
+  };
+
   const handleChangeBackground = (color: string) => {
     const canvas = canvasInstanceRef.current;
     if (!canvas) return;
@@ -184,6 +207,8 @@ export function App() {
           onAddShape={handleAddShape}
           onChangeBackground={handleChangeBackground}
           onSelectFont={handleSelectFont}
+          selectedProductId={selectedProductId}
+          onSelectProduct={handleSelectProduct}
         />
 
         {/* Center Canvas Workspace */}

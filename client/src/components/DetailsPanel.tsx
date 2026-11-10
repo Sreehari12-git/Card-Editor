@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CardDetails, SidebarTab } from '../types';
+import { CardDetails, PRODUCTS, SidebarTab } from '../types';
 import { FONTS, FONT_CATEGORIES, FontCategory } from '../data/fonts';
 
 interface DetailsPanelProps {
@@ -12,6 +12,8 @@ interface DetailsPanelProps {
   onChangeBackground?: (color: string) => void;
   onSelectFont?: (fontFamily: string) => void;
   activeFontFamily?: string;
+  selectedProductId?: string;
+  onSelectProduct?: (productId: string) => void;
 }
 
 export const DetailsPanel: React.FC<DetailsPanelProps> = ({
@@ -24,6 +26,8 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
   onChangeBackground,
   onSelectFont,
   activeFontFamily = 'Inter',
+  selectedProductId = 'business-card',
+  onSelectProduct,
 }) => {
   const [fontSearch, setFontSearch] = useState('');
   const [selectedFontCategory, setSelectedFontCategory] = useState<FontCategory>('All');
@@ -35,7 +39,84 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
     return matchesSearch && matchesCategory;
   });
   return (
-    <aside className="w-72 bg-white border-r border-neutral-200 flex flex-col h-full overflow-y-auto">
+    <aside className="w-64 bg-white border-r border-neutral-200 flex flex-col h-full overflow-y-auto overflow-x-hidden">
+      {/* Product tab */}
+      {activeTab === 'product' && (
+        <div className="p-3.5 flex flex-col gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-neutral-900 tracking-tight">Product</h2>
+            <p className="text-[11px] text-neutral-500 mt-0.5 leading-snug">
+              Each product keeps its own design. Switch any time.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {PRODUCTS.map((prod) => {
+              const isSelected = (selectedProductId || 'business-card') === prod.id;
+              return (
+                <button
+                  key={prod.id}
+                  type="button"
+                  onClick={() => onSelectProduct?.(prod.id)}
+                  className={`w-full p-2.5 rounded-xl text-left flex items-center gap-2.5 border-2 transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-blue-600 bg-white shadow-xs'
+                      : 'border-neutral-200 bg-white hover:border-neutral-300 shadow-2xs'
+                  }`}
+                >
+                  {/* Icon Thumbnail */}
+                  <div className="w-11 h-11 bg-neutral-50 rounded-lg flex items-center justify-center shrink-0 border border-neutral-100">
+                    {prod.id === 'business-card' && (
+                      <div className="w-7 h-4 border border-neutral-300 rounded-[1px] bg-white" />
+                    )}
+                    {prod.id === 'folded-card' && (
+                      <div className="w-7 h-4.5 border border-neutral-300 rounded-[1px] bg-white flex overflow-hidden">
+                        <div className="w-1/2 h-full border-r border-dashed border-neutral-300" />
+                        <div className="w-1/2 h-full" />
+                      </div>
+                    )}
+                    {prod.id === 'tri-fold-brochure' && (
+                      <div className="w-7 h-4.5 border border-neutral-300 rounded-[1px] bg-white flex overflow-hidden">
+                        <div className="w-1/3 h-full border-r border-dashed border-neutral-300" />
+                        <div className="w-1/3 h-full border-r border-dashed border-neutral-300" />
+                        <div className="w-1/3 h-full" />
+                      </div>
+                    )}
+                    {prod.id === 'booklet' && (
+                      <div className="w-4 h-5.5 border border-neutral-300 rounded-[1px] bg-white" />
+                    )}
+                    {prod.id === 'flyer' && (
+                      <div className="w-4 h-5.5 border border-neutral-300 rounded-[1px] bg-white" />
+                    )}
+                  </div>
+
+                  {/* Info details */}
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-xs font-bold text-neutral-900 leading-tight">
+                      {prod.name}
+                    </span>
+                    <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight">
+                      {prod.subtitle}
+                    </span>
+                    <div className="mt-1">
+                      <span
+                        className={`inline-block text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors ${
+                          isSelected
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'bg-neutral-100 text-neutral-600'
+                        }`}
+                      >
+                        {prod.badge}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'details' && (
         <div className="p-5 flex flex-col gap-4">
           <div>
