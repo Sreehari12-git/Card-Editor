@@ -7,7 +7,7 @@ export const TopNav: React.FC = () => {
       <div className="flex items-center gap-8">
         <div className="flex items-center gap-2">
           <span className="font-serif text-lg font-bold tracking-tight text-neutral-900">
-            Gnapi Cards<span className="text-blue-600">.</span>
+            PrintBiz<span className="text-blue-600">.</span>
           </span>
         </div>
 

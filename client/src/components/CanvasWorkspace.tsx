@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { CardDetails, DesignTemplate } from '../types';
+import { FontPickerDropdown } from './FontPickerDropdown';
+import { applyFontToActiveText } from '../utils/fontLoader';
 
 interface CanvasWorkspaceProps {
   selectedTemplate: DesignTemplate | null;
@@ -19,6 +21,14 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [selectedColor, setSelectedColor] = useState<string>('#1e3a8a');
   const [hasSelection, setHasSelection] = useState<boolean>(false);
+
+  // Active text object state
+  const [isTextSelected, setIsTextSelected] = useState<boolean>(false);
+  const [selectedFont, setSelectedFont] = useState<string>('Inter');
+  const [selectedFontSize, setSelectedFontSize] = useState<number>(24);
+  const [isBold, setIsBold] = useState<boolean>(false);
+  const [isItalic, setIsItalic] = useState<boolean>(false);
+  const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right'>('left');
 
   // Undo / Redo History state
   const history = useRef<string[]>([]);
@@ -137,6 +147,18 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       setHasSelection(!!activeObj);
       if (activeObj && 'fill' in activeObj && typeof activeObj.fill === 'string') {
         setSelectedColor(activeObj.fill);
+      }
+
+      if (activeObj && 'fontFamily' in activeObj) {
+        setIsTextSelected(true);
+        const objAny = activeObj as any;
+        setSelectedFont(objAny.fontFamily || 'Inter');
+        setSelectedFontSize(Math.round(objAny.fontSize || 24));
+        setIsBold(objAny.fontWeight === 'bold' || Number(objAny.fontWeight) >= 700);
+        setIsItalic(objAny.fontStyle === 'italic');
+        setTextAlign(objAny.textAlign || 'left');
+      } else {
+        setIsTextSelected(false);
       }
     };
 
@@ -449,6 +471,80 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     }
   };
 
+  const handleFontChange = async (fontFamily: string) => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    setSelectedFont(fontFamily);
+    await applyFontToActiveText(canvas, fontFamily, () => {
+      saveHistoryState();
+    });
+  };
+
+  const handleFontSizeChange = (deltaOrValue: number, isAbsolute: boolean = false) => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (!active || !('fontSize' in active)) return;
+
+    const current = (active as any).fontSize || 24;
+    const newSize = Math.max(8, Math.min(200, isAbsolute ? deltaOrValue : current + deltaOrValue));
+
+    (active as any).set('fontSize', newSize);
+    if (typeof (active as any).initDimensions === 'function') {
+      (active as any).initDimensions();
+    }
+    active.setCoords();
+    canvas.requestRenderAll();
+    setSelectedFontSize(newSize);
+    saveHistoryState();
+  };
+
+  const handleToggleBold = () => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (!active || !('fontWeight' in active)) return;
+
+    const nextBold = !isBold;
+    (active as any).set('fontWeight', nextBold ? 'bold' : 'normal');
+    if (typeof (active as any).initDimensions === 'function') {
+      (active as any).initDimensions();
+    }
+    active.setCoords();
+    canvas.requestRenderAll();
+    setIsBold(nextBold);
+    saveHistoryState();
+  };
+
+  const handleToggleItalic = () => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (!active || !('fontStyle' in active)) return;
+
+    const nextItalic = !isItalic;
+    (active as any).set('fontStyle', nextItalic ? 'italic' : 'normal');
+    if (typeof (active as any).initDimensions === 'function') {
+      (active as any).initDimensions();
+    }
+    active.setCoords();
+    canvas.requestRenderAll();
+    setIsItalic(nextItalic);
+    saveHistoryState();
+  };
+
+  const handleTextAlignChange = (align: 'left' | 'center' | 'right') => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (!active || !('textAlign' in active)) return;
+
+    (active as any).set('textAlign', align);
+    canvas.requestRenderAll();
+    setTextAlign(align);
+    saveHistoryState();
+  };
+
   const changeZoom = (delta: number) => {
     setZoomLevel((prev) => Math.min(200, Math.max(50, prev + delta)));
   };
@@ -523,6 +619,108 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
               title="Change element color"
             />
           </div>
+
+          {/* Contextual Text Formatting Toolbar (visible when text is selected) */}
+          {isTextSelected && (
+            <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-neutral-200 animate-in fade-in duration-150">
+              {/* Font Family Dropdown */}
+              <FontPickerDropdown
+                currentFont={selectedFont}
+                onSelectFont={handleFontChange}
+              />
+
+              {/* Font Size Controls */}
+              <div className="flex items-center border border-neutral-300 rounded h-7 bg-white">
+                <button
+                  type="button"
+                  onClick={() => handleFontSizeChange(-2)}
+                  className="w-6 h-full flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-l cursor-pointer text-xs font-bold"
+                  title="Decrease font size"
+                >
+                  -
+                </button>
+                <span className="w-8 text-center text-xs font-medium text-neutral-800">
+                  {selectedFontSize}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleFontSizeChange(2)}
+                  className="w-6 h-full flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-r cursor-pointer text-xs font-bold"
+                  title="Increase font size"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Bold Toggle */}
+              <button
+                type="button"
+                onClick={handleToggleBold}
+                className={`w-7 h-7 rounded flex items-center justify-center text-xs font-bold transition-colors cursor-pointer ${
+                  isBold
+                    ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                    : 'text-neutral-700 hover:bg-neutral-100 border border-transparent'
+                }`}
+                title="Bold"
+              >
+                B
+              </button>
+
+              {/* Italic Toggle */}
+              <button
+                type="button"
+                onClick={handleToggleItalic}
+                className={`w-7 h-7 rounded flex items-center justify-center text-xs italic font-serif transition-colors cursor-pointer ${
+                  isItalic
+                    ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                    : 'text-neutral-700 hover:bg-neutral-100 border border-transparent'
+                }`}
+                title="Italic"
+              >
+                I
+              </button>
+
+              {/* Alignment Controls */}
+              <div className="flex items-center border border-neutral-200 rounded h-7 bg-white p-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleTextAlignChange('left')}
+                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
+                    textAlign === 'left' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
+                  }`}
+                  title="Align Left"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h14" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTextAlignChange('center')}
+                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
+                    textAlign === 'center' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
+                  }`}
+                  title="Align Center"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M5 18h14" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTextAlignChange('right')}
+                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
+                    textAlign === 'right' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
+                  }`}
+                  title="Align Right"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M10 12h10M6 18h14" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right tools: Position, Info, Duplicate, Trash */}

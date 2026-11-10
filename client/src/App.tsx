@@ -7,6 +7,7 @@ import { DetailsPanel } from './components/DetailsPanel';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { PreviewModal } from './components/PreviewModal';
 import { CardDetails, DesignTemplate, SidebarTab } from './types';
+import { ensureFontLoaded, applyFontToActiveText } from './utils/fontLoader';
 
 export function App() {
   const [templates, setTemplates] = useState<DesignTemplate[]>([]);
@@ -53,19 +54,33 @@ export function App() {
     setDetails((prev) => ({ ...prev, ...updated }));
   };
 
-  const handleAddText = (text: string, style: any = {}) => {
+  const handleAddText = async (text: string, style: any = {}) => {
     const canvas = canvasInstanceRef.current;
     if (!canvas) return;
+    const fontFamily = style.fontFamily || 'Inter';
+    await ensureFontLoaded(fontFamily, style.fontWeight || 400);
+
     const textObj = new fabric.Textbox(text, {
       left: 150,
       top: 150,
       width: 300,
-      fontFamily: 'Inter',
+      fontFamily,
       ...style,
     });
     canvas.add(textObj);
     canvas.setActiveObject(textObj);
     canvas.renderAll();
+  };
+
+  const handleSelectFont = async (fontFamily: string) => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (activeObj && 'fontFamily' in activeObj) {
+      await applyFontToActiveText(canvas, fontFamily);
+    } else {
+      handleAddText('Sample Text', { fontFamily, fontSize: 32 });
+    }
   };
 
   const handleAddShape = (type: 'rect' | 'circle' | 'star') => {
@@ -168,6 +183,7 @@ export function App() {
           onAddText={handleAddText}
           onAddShape={handleAddShape}
           onChangeBackground={handleChangeBackground}
+          onSelectFont={handleSelectFont}
         />
 
         {/* Center Canvas Workspace */}
