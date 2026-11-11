@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CardDetails, PRODUCTS, SidebarTab } from '../types';
+import React, { useRef, useState } from 'react';
+import { CardDetails, PRODUCTS, SidebarTab, UploadedGraphic } from '../types';
 import { FONTS, FONT_CATEGORIES, FontCategory } from '../data/fonts';
 
 interface DetailsPanelProps {
@@ -14,6 +14,10 @@ interface DetailsPanelProps {
   activeFontFamily?: string;
   selectedProductId?: string;
   onSelectProduct?: (productId: string) => void;
+  uploadedLogos?: UploadedGraphic[];
+  onUploadLogo?: (file: File) => Promise<void>;
+  onAddLogoToCanvas?: (logo: UploadedGraphic) => void;
+  onDeleteUploadedLogo?: (id: string) => void;
 }
 
 export const DetailsPanel: React.FC<DetailsPanelProps> = ({
@@ -21,16 +25,53 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
   details,
   onChangeDetails,
   onAddText,
-  onAddShape,
   onAddQrCode,
   onChangeBackground,
   onSelectFont,
   activeFontFamily = 'Inter',
   selectedProductId = 'business-card',
   onSelectProduct,
+  uploadedLogos = [],
+  onUploadLogo,
+  onAddLogoToCanvas,
+  onDeleteUploadedLogo,
 }) => {
   const [fontSearch, setFontSearch] = useState('');
   const [selectedFontCategory, setSelectedFontCategory] = useState<FontCategory>('All');
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploading(true);
+      await onUploadLogo?.(file);
+    } catch (err) {
+      console.error('Error uploading logo:', err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploading(true);
+      await onUploadLogo?.(file);
+    } catch (err) {
+      console.error('Error uploading logo via drag-and-drop:', err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const filteredFonts = FONTS.filter((font) => {
     const matchesSearch = font.name.toLowerCase().includes(fontSearch.toLowerCase());
@@ -39,7 +80,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
     return matchesSearch && matchesCategory;
   });
   return (
-    <aside className="w-64 bg-white border-r border-neutral-200 flex flex-col h-full overflow-y-auto overflow-x-hidden">
+    <aside className="w-72 bg-[#faf8f5] border-r border-neutral-200 flex flex-col h-full overflow-y-auto overflow-x-hidden">
       {/* Product tab */}
       {activeTab === 'product' && (
         <div className="p-3.5 flex flex-col gap-3">
@@ -335,30 +376,123 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
 
       {/* Graphics tab */}
       {activeTab === 'graphics' && (
-        <div className="p-5 flex flex-col gap-3">
-          <h2 className="text-base font-bold text-neutral-900">Graphics & Shapes</h2>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => onAddShape?.('rect')}
-              className="p-3 border border-neutral-300 rounded-lg flex flex-col items-center justify-center hover:bg-neutral-50 text-xs font-medium"
-            >
-              <div className="w-8 h-6 bg-blue-500 rounded mb-1" />
-              Box
-            </button>
-            <button
-              onClick={() => onAddShape?.('circle')}
-              className="p-3 border border-neutral-300 rounded-lg flex flex-col items-center justify-center hover:bg-neutral-50 text-xs font-medium"
-            >
-              <div className="w-7 h-7 bg-blue-500 rounded-full mb-1" />
-              Circle
-            </button>
-            <button
-              onClick={() => onAddShape?.('star')}
-              className="p-3 border border-neutral-300 rounded-lg flex flex-col items-center justify-center hover:bg-neutral-50 text-xs font-medium col-span-2"
-            >
-              <div className="text-xl text-blue-500 mb-1">✳️</div>
-              8-Point Star Emblem
-            </button>
+        <div
+          className="p-5 flex flex-col gap-3.5"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+        >
+          {/* Header matching Details & Product fonts */}
+          <div>
+            <h2 className="text-base font-bold text-neutral-900 tracking-tight">
+              Graphics
+            </h2>
+          </div>
+
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png, image/jpeg, image/jpg, image/svg+xml, image/webp"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          {/* Upload Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className={`w-full py-2.5 px-4 border rounded-xl flex items-center justify-center gap-2 text-neutral-800 text-xs font-semibold shadow-2xs transition-all cursor-pointer group ${
+              isDragOver
+                ? 'border-blue-500 bg-blue-50/70 scale-[0.99]'
+                : 'border-neutral-200 bg-white hover:bg-neutral-50 hover:border-neutral-300'
+            }`}
+          >
+            {isUploading ? (
+              <svg className="animate-spin w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            ) : (
+              <svg
+                className="w-4 h-4 text-neutral-700 transition-transform group-hover:-translate-y-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                />
+              </svg>
+            )}
+            <span>{isUploading ? 'Uploading...' : 'Upload logo or graphic'}</span>
+          </button>
+
+          {/* Helper / Guidelines text matching Details & Product fonts */}
+          <p className="text-xs text-neutral-500 leading-relaxed font-normal">
+            SVG graphics can be recoloured. PNG with a transparent background works best for logos.
+          </p>
+
+          {/* My Uploads Section */}
+          <div className="pt-2">
+            <h3 className="text-xs font-bold text-neutral-900 tracking-tight mb-2.5">
+              My uploads
+            </h3>
+
+            {uploadedLogos.length === 0 ? (
+              <p className="text-xs text-neutral-400 font-normal">
+                Nothing uploaded yet.
+              </p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2.5">
+                {uploadedLogos.map((logo) => (
+                  <div
+                    key={logo.id}
+                    onClick={() => onAddLogoToCanvas?.(logo)}
+                    className="group relative aspect-square rounded-xl border border-neutral-200 hover:border-blue-500 bg-white p-2 flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:shadow-xs"
+                    title="Click to add to card"
+                  >
+                    {/* Checkerboard thumbnail container for transparent PNG/SVG logos */}
+                    <div
+                      className="w-full h-full rounded-lg flex items-center justify-center p-1 overflow-hidden"
+                      style={{
+                        backgroundImage:
+                          'linear-gradient(45deg, #f1f3f5 25%, transparent 25%), linear-gradient(-45deg, #f1f3f5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f1f3f5 75%), linear-gradient(-45deg, transparent 75%, #f1f3f5 75%)',
+                        backgroundSize: '8px 8px',
+                        backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
+                        backgroundColor: '#ffffff',
+                      }}
+                    >
+                      <img
+                        src={logo.dataUrl}
+                        alt="Uploaded logo"
+                        className="max-h-full max-w-full object-contain pointer-events-none"
+                      />
+                    </div>
+
+                    {/* Delete button on hover */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteUploadedLogo?.(logo.id);
+                      }}
+                      title="Delete from uploads"
+                      className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 rounded-full bg-neutral-800 hover:bg-red-600 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs shadow-xs cursor-pointer z-10"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

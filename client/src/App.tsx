@@ -6,7 +6,7 @@ import { SidebarRail } from './components/SidebarRail';
 import { DetailsPanel } from './components/DetailsPanel';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { PreviewModal } from './components/PreviewModal';
-import { CardDetails, DesignTemplate, PRODUCTS, SidebarTab } from './types';
+import { CardDetails, DesignTemplate, PRODUCTS, SidebarTab, UploadedGraphic } from './types';
 import { ensureFontLoaded, applyFontToActiveText } from './utils/fontLoader';
 
 export function App() {
@@ -31,6 +31,121 @@ export function App() {
   });
 
   const canvasInstanceRef = useRef<fabric.Canvas | null>(null);
+
+  // Uploaded Logos state persisted in localStorage
+  const [uploadedLogos, setUploadedLogos] = useState<UploadedGraphic[]>(() => {
+    try {
+      const saved = localStorage.getItem('card_editor_uploaded_logos');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('card_editor_uploaded_logos', JSON.stringify(uploadedLogos));
+    } catch (err) {
+      console.error('Failed to save uploaded logos:', err);
+    }
+  }, [uploadedLogos]);
+
+  // Add an uploaded graphic or logo onto the Fabric canvas
+  const handleAddLogoToCanvas = async (graphic: UploadedGraphic) => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+
+    try {
+      let fabricObj: fabric.FabricObject | null = null;
+
+      if (graphic.isSvg && graphic.svgContent) {
+        try {
+          const parsed = await fabric.loadSVGFromString(graphic.svgContent);
+          const validObjects = (parsed.objects || []).filter(
+            (o): o is fabric.FabricObject => o !== null,
+          );
+          if (validObjects.length === 1) {
+            fabricObj = validObjects[0];
+          } else if (validObjects.length > 1) {
+            fabricObj = fabric.util.groupSVGElements(validObjects, parsed.options);
+          }
+        } catch (svgErr) {
+          console.warn('SVG vector parse failed, loading as image:', svgErr);
+        }
+      }
+
+      if (!fabricObj) {
+        fabricObj = await fabric.FabricImage.fromURL(graphic.dataUrl);
+      }
+
+      if (!fabricObj) return;
+
+      // Fit appropriately within a standard 160x120 container on the card
+      const maxDim = 160;
+      const origW = fabricObj.width || 100;
+      const origH = fabricObj.height || 100;
+      const scale = Math.min(maxDim / origW, maxDim / origH, 1);
+
+      fabricObj.set({
+        left: 70,
+        top: 55,
+        scaleX: (fabricObj.scaleX || 1) * scale,
+        scaleY: (fabricObj.scaleY || 1) * scale,
+        cornerColor: '#ffffff',
+        cornerStrokeColor: '#0284c7',
+        cornerStyle: 'rect',
+        cornerSize: 9,
+        touchCornerSize: 24,
+        transparentCorners: false,
+      });
+
+      canvas.add(fabricObj);
+      canvas.setActiveObject(fabricObj);
+      canvas.renderAll();
+    } catch (err) {
+      console.error('Failed to add logo to canvas:', err);
+    }
+  };
+
+  // Upload logo from user device
+  const handleUploadLogo = async (file: File) => {
+    const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+
+    return new Promise<void>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        let svgContent: string | undefined = undefined;
+
+        if (isSvg) {
+          try {
+            svgContent = await file.text();
+          } catch (e) {
+            console.warn('Could not read SVG text:', e);
+          }
+        }
+
+        const newGraphic: UploadedGraphic = {
+          id: `logo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: file.name,
+          dataUrl,
+          isSvg,
+          svgContent,
+          createdAt: Date.now(),
+        };
+
+        setUploadedLogos((prev) => [newGraphic, ...prev]);
+        await handleAddLogoToCanvas(newGraphic);
+        resolve();
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleDeleteUploadedLogo = (id: string) => {
+    setUploadedLogos((prev) => prev.filter((item) => item.id !== id));
+  };
 
   // Fetch templates from local NestJS backend
   useEffect(() => {
@@ -209,6 +324,10 @@ export function App() {
           onSelectFont={handleSelectFont}
           selectedProductId={selectedProductId}
           onSelectProduct={handleSelectProduct}
+          uploadedLogos={uploadedLogos}
+          onUploadLogo={handleUploadLogo}
+          onAddLogoToCanvas={handleAddLogoToCanvas}
+          onDeleteUploadedLogo={handleDeleteUploadedLogo}
         />
 
         {/* Center Canvas Workspace */}

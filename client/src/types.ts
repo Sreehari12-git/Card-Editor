@@ -102,3 +102,13 @@ export type SidebarTab =
   | 'colours'
   | 'background'
   | 'layers';
+
+export interface UploadedGraphic {
+  id: string;
+  name: string;
+  dataUrl: string;
+  isSvg: boolean;
+  svgContent?: string;
+  createdAt: number;
+}
+

@@ -4,6 +4,147 @@ import { CardDetails, DesignTemplate } from '../types';
 import { FloatingElementToolbar } from './FloatingElementToolbar';
 import { applyFontToActiveText } from '../utils/fontLoader';
 
+// Rotation icon SVG image loaded for crisp rendering on canvas control
+const rotateIconImg = typeof window !== 'undefined' ? new Image() : null;
+if (rotateIconImg) {
+  rotateIconImg.src = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8'/%3E%3Cpolyline points='21 3 21 8 16 8'/%3E%3C/svg%3E`;
+}
+
+// Global live rotation tracking flags for control renderer
+let isRotatingWithMouse = false;
+let activeRotatingAngle: number | null = null;
+
+// Custom rotation handle rendering: circular button with 🔄 rotation arrows matching the reference image
+function renderRotationHandle(
+  this: any,
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  _styleOverride: any,
+  _fabricObject: fabric.FabricObject
+) {
+  const size = 26;
+  const radius = size / 2;
+
+  ctx.save();
+  ctx.translate(left, top);
+
+  // 1. White circular button background with soft drop shadow
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 1;
+  ctx.fill();
+
+  // 2. Crisp cyan/blue circular border
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = '#0284c7';
+  ctx.lineWidth = 1.75;
+  ctx.stroke();
+
+  // 3. Circular rotation arrows inside
+  if (rotateIconImg && rotateIconImg.complete && rotateIconImg.naturalWidth > 0) {
+    const iconSize = 14;
+    ctx.drawImage(rotateIconImg, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
+  } else {
+    ctx.strokeStyle = '#0f172a';
+    ctx.fillStyle = '#0f172a';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+
+    const r = 5.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI * 0.85, -Math.PI * 0.15);
+    ctx.stroke();
+
+    const a1Angle = -Math.PI * 0.15;
+    const a1X = r * Math.cos(a1Angle);
+    const a1Y = r * Math.sin(a1Angle);
+    ctx.beginPath();
+    ctx.moveTo(a1X - 2.5, a1Y - 3);
+    ctx.lineTo(a1X + 2, a1Y);
+    ctx.lineTo(a1X - 2.5, a1Y + 3);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, r, Math.PI * 0.15, Math.PI * 0.85);
+    ctx.stroke();
+
+    const a2Angle = Math.PI * 0.85;
+    const a2X = r * Math.cos(a2Angle);
+    const a2Y = r * Math.sin(a2Angle);
+    ctx.beginPath();
+    ctx.moveTo(a2X + 2.5, a2Y + 3);
+    ctx.lineTo(a2X - 2, a2Y);
+    ctx.lineTo(a2X + 2.5, a2Y - 3);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 4. Live degree tooltip directly above the handle while rotating
+  if (isRotatingWithMouse && activeRotatingAngle !== null) {
+    const angleText = `${activeRotatingAngle}°`;
+    ctx.save();
+    ctx.font = 'bold 12px Inter, system-ui, sans-serif';
+    const textWidth = ctx.measureText(angleText).width;
+    const pillW = Math.max(textWidth + 14, 40);
+    const pillH = 22;
+    const pillY = -28;
+
+    ctx.beginPath();
+    const px = -pillW / 2;
+    const py = pillY - pillH / 2;
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(px, py, pillW, pillH, 6);
+    } else {
+      ctx.rect(px, py, pillW, pillH);
+    }
+    ctx.fillStyle = '#0f172a';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(angleText, 0, pillY);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// Global handle defaults matching user screenshot: white square corners with blue border
+fabric.FabricObject.ownDefaults.cornerColor = '#ffffff';
+fabric.FabricObject.ownDefaults.cornerStrokeColor = '#0284c7';
+fabric.FabricObject.ownDefaults.cornerStyle = 'rect';
+fabric.FabricObject.ownDefaults.cornerSize = 9;
+fabric.FabricObject.ownDefaults.touchCornerSize = 24;
+fabric.FabricObject.ownDefaults.transparentCorners = false;
+fabric.FabricObject.ownDefaults.borderColor = '#0284c7';
+fabric.FabricObject.ownDefaults.borderScaleFactor = 1.5;
+
+// Customize interactive controls for all fabric objects to attach the rotation handle
+const origCreateControls = fabric.InteractiveFabricObject.createControls;
+fabric.InteractiveFabricObject.createControls = function () {
+  const result = origCreateControls.call(this);
+  if (result.controls.mtr) {
+    result.controls.mtr.sizeX = 26;
+    result.controls.mtr.sizeY = 26;
+    result.controls.mtr.touchSizeX = 36;
+    result.controls.mtr.touchSizeY = 36;
+    result.controls.mtr.offsetY = -34;
+    result.controls.mtr.cursorStyleHandler = () => 'grab';
+    result.controls.mtr.render = renderRotationHandle;
+  }
+  return result;
+};
+
 interface CanvasWorkspaceProps {
   selectedTemplate: DesignTemplate | null;
   details: CardDetails;
@@ -25,7 +166,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
   // Active text object state
   const [isTextSelected, setIsTextSelected] = useState<boolean>(false);
-  const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
+  const [toolbarPosition, setToolbarPosition] = useState<{
+    x: number;
+    y: number;
+    placeBelow?: boolean;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const isDraggingRef = useRef<boolean>(false);
   const [selectedFont, setSelectedFont] = useState<string>('Inter');
   const [selectedFontSize, setSelectedFontSize] = useState<number>(24);
   const [isBold, setIsBold] = useState<boolean>(false);
@@ -43,8 +190,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const history = useRef<string[]>([]);
   const historyIndex = useRef<number>(-1);
   const isHistoryProcessing = useRef<boolean>(false);
-  const [canUndo, setCanUndo] = useState<boolean>(false);
-  const [canRedo, setCanRedo] = useState<boolean>(false);
+  const [, setCanUndo] = useState<boolean>(false);
+  const [, setCanRedo] = useState<boolean>(false);
 
   // References to keep track of specific variable text boxes on canvas
   const textObjectMap = useRef<{ [key: string]: fabric.Textbox }>({});
@@ -152,6 +299,25 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     canvasInstanceRef.current = canvas;
     setCanvasVersion((v) => v + 1);
 
+    const computeToolbarPosition = (activeObj: fabric.FabricObject) => {
+      const bound = activeObj.getBoundingRect();
+      // By default, the toolbar should always be ON TOP of the element.
+      // Only when placed in/near a top corner or top edge (bound.top < 85) does it dock UNDER the element.
+      const placeBelow = bound.top < 85;
+
+      const canvasW = canvas.getWidth();
+      const centerX = bound.left + bound.width / 2;
+      const clampedX = Math.max(90, Math.min(canvasW - 90, centerX));
+
+      return {
+        x: clampedX,
+        // Distance ensures that whether at 0° or 180° rotation,
+        // the rotation handle never collides with the toolbar and maintains comfortable breathing room.
+        y: placeBelow ? bound.top + bound.height + 72 : bound.top - 66,
+        placeBelow,
+      };
+    };
+
     const updateSelectionState = () => {
       const activeObj = canvas.getActiveObject();
       setHasSelection(!!activeObj);
@@ -160,11 +326,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       }
 
       if (activeObj) {
-        const bound = activeObj.getBoundingRect();
-        setToolbarPosition({
-          x: bound.left + bound.width / 2,
-          y: bound.top,
-        });
+        setToolbarPosition(computeToolbarPosition(activeObj));
 
         if ('fontFamily' in activeObj) {
           setIsTextSelected(true);
@@ -186,26 +348,59 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     const updatePositionOnly = () => {
       const activeObj = canvas.getActiveObject();
       if (activeObj) {
-        const bound = activeObj.getBoundingRect();
-        setToolbarPosition({
-          x: bound.left + bound.width / 2,
-          y: bound.top,
-        });
+        setToolbarPosition(computeToolbarPosition(activeObj));
       }
+    };
+
+    const handleTransformStart = () => {
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        setIsDragging(true);
+      }
+    };
+
+    const handleRotating = (e: any) => {
+      handleTransformStart();
+      const target = e.target;
+      if (target) {
+        const raw = Math.round(target.angle || 0) % 360;
+        const deg = (raw + 360) % 360;
+        isRotatingWithMouse = true;
+        activeRotatingAngle = deg;
+      }
+    };
+
+    const handleTransformEnd = () => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        setIsDragging(false);
+      }
+      isRotatingWithMouse = false;
+      activeRotatingAngle = null;
+      updatePositionOnly();
     };
 
     canvas.on('selection:created', updateSelectionState);
     canvas.on('selection:updated', updateSelectionState);
     canvas.on('selection:cleared', () => {
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      isRotatingWithMouse = false;
+      activeRotatingAngle = null;
       setHasSelection(false);
       setIsTextSelected(false);
       setToolbarPosition(null);
     });
-    canvas.on('object:moving', updatePositionOnly);
-    canvas.on('object:scaling', updatePositionOnly);
+    canvas.on('object:moving', handleTransformStart);
+    canvas.on('object:scaling', handleTransformStart);
+    canvas.on('object:rotating', handleRotating);
 
-    // Track user canvas modifications into history
-    canvas.on('object:modified', () => saveHistoryState());
+    // Track user canvas modifications into history & finish dragging
+    canvas.on('object:modified', () => {
+      handleTransformEnd();
+      saveHistoryState();
+    });
+    canvas.on('mouse:up', handleTransformEnd);
 
     // Keyboard shortcuts for Undo (Ctrl+Z) & Redo (Ctrl+Y / Ctrl+Shift+Z)
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -622,24 +817,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     handleTextAlignChange(nextAlign);
   };
 
-  const handleDuplicate = () => {
-    const canvas = canvasInstanceRef.current;
-    if (!canvas) return;
-    const active = canvas.getActiveObject();
-    if (active) {
-      active.clone().then((cloned: fabric.FabricObject) => {
-        cloned.set({
-          left: (active.left || 0) + 20,
-          top: (active.top || 0) + 20,
-        });
-        canvas.add(cloned);
-        canvas.setActiveObject(cloned);
-        canvas.renderAll();
-        saveHistoryState();
-      });
-    }
-  };
-
   const handleFontChange = async (fontFamily: string) => {
     const canvas = canvasInstanceRef.current;
     if (!canvas) return;
@@ -836,7 +1013,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           <canvas ref={canvasRef} />
 
           {/* Floating Contextual Popup Toolbar directly above the active element */}
-          {hasSelection && toolbarPosition && (
+          {hasSelection && toolbarPosition && !isDragging && (
             <FloatingElementToolbar
               position={toolbarPosition}
               isText={isTextSelected}
