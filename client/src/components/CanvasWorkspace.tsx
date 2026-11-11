@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { CardDetails, DesignTemplate } from '../types';
-import { FontPickerDropdown } from './FontPickerDropdown';
+import { FloatingElementToolbar } from './FloatingElementToolbar';
 import { applyFontToActiveText } from '../utils/fontLoader';
 
 interface CanvasWorkspaceProps {
@@ -21,14 +21,23 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [selectedColor, setSelectedColor] = useState<string>('#1e3a8a');
   const [hasSelection, setHasSelection] = useState<boolean>(false);
+  const [canvasVersion, setCanvasVersion] = useState<number>(0);
 
   // Active text object state
   const [isTextSelected, setIsTextSelected] = useState<boolean>(false);
+  const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedFont, setSelectedFont] = useState<string>('Inter');
   const [selectedFontSize, setSelectedFontSize] = useState<number>(24);
   const [isBold, setIsBold] = useState<boolean>(false);
   const [isItalic, setIsItalic] = useState<boolean>(false);
   const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right'>('left');
+
+  // Active side state for Front and Back of the card
+  const [activeSide, setActiveSide] = useState<'front' | 'back'>('front');
+  // Whether the card has a back side (defaults to false until user adds it)
+  const [hasBackSide, setHasBackSide] = useState<boolean>(false);
+  const frontJsonRef = useRef<any>(null);
+  const backJsonRef = useRef<any>(null);
 
   // Undo / Redo History state
   const history = useRef<string[]>([]);
@@ -141,6 +150,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     });
 
     canvasInstanceRef.current = canvas;
+    setCanvasVersion((v) => v + 1);
 
     const updateSelectionState = () => {
       const activeObj = canvas.getActiveObject();
@@ -149,22 +159,50 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         setSelectedColor(activeObj.fill);
       }
 
-      if (activeObj && 'fontFamily' in activeObj) {
-        setIsTextSelected(true);
-        const objAny = activeObj as any;
-        setSelectedFont(objAny.fontFamily || 'Inter');
-        setSelectedFontSize(Math.round(objAny.fontSize || 24));
-        setIsBold(objAny.fontWeight === 'bold' || Number(objAny.fontWeight) >= 700);
-        setIsItalic(objAny.fontStyle === 'italic');
-        setTextAlign(objAny.textAlign || 'left');
+      if (activeObj) {
+        const bound = activeObj.getBoundingRect();
+        setToolbarPosition({
+          x: bound.left + bound.width / 2,
+          y: bound.top,
+        });
+
+        if ('fontFamily' in activeObj) {
+          setIsTextSelected(true);
+          const objAny = activeObj as any;
+          setSelectedFont(objAny.fontFamily || 'Inter');
+          setSelectedFontSize(Math.round(objAny.fontSize || 24));
+          setIsBold(objAny.fontWeight === 'bold' || Number(objAny.fontWeight) >= 700);
+          setIsItalic(objAny.fontStyle === 'italic');
+          setTextAlign(objAny.textAlign || 'left');
+        } else {
+          setIsTextSelected(false);
+        }
       } else {
+        setToolbarPosition(null);
         setIsTextSelected(false);
+      }
+    };
+
+    const updatePositionOnly = () => {
+      const activeObj = canvas.getActiveObject();
+      if (activeObj) {
+        const bound = activeObj.getBoundingRect();
+        setToolbarPosition({
+          x: bound.left + bound.width / 2,
+          y: bound.top,
+        });
       }
     };
 
     canvas.on('selection:created', updateSelectionState);
     canvas.on('selection:updated', updateSelectionState);
-    canvas.on('selection:cleared', updateSelectionState);
+    canvas.on('selection:cleared', () => {
+      setHasSelection(false);
+      setIsTextSelected(false);
+      setToolbarPosition(null);
+    });
+    canvas.on('object:moving', updatePositionOnly);
+    canvas.on('object:scaling', updatePositionOnly);
 
     // Track user canvas modifications into history
     canvas.on('object:modified', () => saveHistoryState());
@@ -189,6 +227,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       canvas.dispose();
       canvasInstanceRef.current = null;
+      setCanvasVersion(0);
     };
   }, [saveHistoryState, handleUndo, handleRedo]);
 
@@ -207,59 +246,15 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     return star;
   }, []);
 
-  // Generate mock QR Code matrix
-  const createQrCode = useCallback(() => {
-    const group = new fabric.Group([], {
-      left: 840,
-      top: 420,
-      selectable: true,
-    });
-
-    const qrBg = new fabric.Rect({
-      width: 140,
-      height: 140,
-      fill: '#ffffff',
-      stroke: '#e2e8f0',
-      strokeWidth: 1,
-    });
-    group.add(qrBg);
-
-    const size = 14;
-    const count = 9;
-    const matrix = [
-      [1, 1, 1, 1, 1, 0, 1, 1, 1],
-      [1, 0, 0, 0, 1, 0, 1, 0, 1],
-      [1, 0, 1, 0, 1, 0, 1, 0, 1],
-      [1, 1, 1, 1, 1, 0, 1, 1, 1],
-      [0, 0, 0, 0, 0, 1, 0, 0, 0],
-      [1, 0, 1, 1, 0, 1, 1, 0, 1],
-      [1, 1, 1, 0, 1, 0, 1, 1, 0],
-      [1, 0, 1, 0, 0, 1, 0, 1, 1],
-      [1, 1, 1, 1, 0, 1, 1, 0, 1],
-    ];
-
-    for (let r = 0; r < count; r++) {
-      for (let c = 0; c < count; c++) {
-        if (matrix[r][c] === 1) {
-          const pixel = new fabric.Rect({
-            left: 7 + c * size,
-            top: 7 + r * size,
-            width: size - 1,
-            height: size - 1,
-            fill: '#0f172a',
-          });
-          group.add(pixel);
-        }
-      }
-    }
-
-    return group;
-  }, []);
-
-  // Re-render template layout whenever selectedTemplate changes
+  // Re-render template layout whenever selectedTemplate changes or a new canvas is mounted
   useEffect(() => {
     const canvas = canvasInstanceRef.current;
     if (!canvas) return;
+
+    // Reset selection & toolbar to prevent ghost floating toolbars on remount
+    setHasSelection(false);
+    setIsTextSelected(false);
+    setToolbarPosition(null);
 
     isHistoryProcessing.current = true;
     canvas.clear();
@@ -362,9 +357,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     });
     textObjectMap.current['website'] = websiteObj;
 
-    // 7. QR Code
-    const qrObj = createQrCode();
-
     canvas.add(
       logoObj,
       starObj,
@@ -374,7 +366,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       phoneObj,
       emailObj,
       websiteObj,
-      qrObj,
     );
 
     canvas.renderAll();
@@ -386,7 +377,177 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     setCanUndo(false);
     setCanRedo(false);
     isHistoryProcessing.current = false;
-  }, [selectedTemplate]);
+  }, [selectedTemplate, canvasVersion]);
+
+  // Render Back Side Card with default white color
+  const renderBackSide = useCallback((canvas: fabric.Canvas) => {
+    isHistoryProcessing.current = true;
+    canvas.clear();
+    // Default white background color for the backside of the card
+    canvas.backgroundColor = '#ffffff';
+
+    const width = selectedTemplate?.widthPx || 1050;
+    const height = selectedTemplate?.heightPx || 600;
+    canvas.setDimensions({ width, height });
+
+    // Stylized emblem box on white background
+    const emblemBox = new fabric.Rect({
+      left: 485,
+      top: 130,
+      width: 80,
+      height: 80,
+      rx: 16,
+      ry: 16,
+      fill: '#f1f5f9',
+      stroke: '#cbd5e1',
+      strokeWidth: 1.5,
+      selectable: true,
+    });
+
+    const initials = details.logoText ? details.logoText.slice(0, 2).toUpperCase() : 'MV';
+    const emblemText = new fabric.Textbox(initials, {
+      left: 485,
+      top: 150,
+      width: 80,
+      fontSize: 34,
+      fontFamily: 'Space Grotesk, Inter, sans-serif',
+      fontWeight: 'bold',
+      fill: '#0f172a',
+      textAlign: 'center',
+      selectable: true,
+    });
+
+    // Back Name
+    const backName = new fabric.Textbox((details.fullName || 'Enter name').toUpperCase(), {
+      left: 175,
+      top: 245,
+      width: 700,
+      fontSize: 32,
+      fontFamily: 'Space Grotesk, Inter, sans-serif',
+      fontWeight: 'bold',
+      fill: '#0f172a',
+      textAlign: 'center',
+      charSpacing: 140,
+      selectable: true,
+    });
+
+    // Back Tagline / Title
+    const backTagline = new fabric.Textbox((details.tagline || 'CPA, Accountant').toUpperCase(), {
+      left: 175,
+      top: 298,
+      width: 700,
+      fontSize: 16,
+      fontFamily: 'Space Grotesk, Inter, sans-serif',
+      fontWeight: '600',
+      fill: '#2563eb',
+      textAlign: 'center',
+      charSpacing: 100,
+      selectable: true,
+    });
+
+    // Back Contact / Web
+    const backWeb = new fabric.Textbox(details.website || 'www.website.com', {
+      left: 175,
+      top: 410,
+      width: 700,
+      fontSize: 17,
+      fontFamily: 'Space Grotesk, Inter, sans-serif',
+      fontWeight: '500',
+      fill: '#64748b',
+      textAlign: 'center',
+      charSpacing: 50,
+      selectable: true,
+    });
+
+    canvas.add(emblemBox, emblemText, backName, backTagline, backWeb);
+    canvas.renderAll();
+    isHistoryProcessing.current = false;
+  }, [selectedTemplate, details]);
+
+  // Handle switching between Front and Back of the card
+  const handleSwitchSide = useCallback(async (targetSide: 'front' | 'back') => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas || activeSide === targetSide) return;
+
+    canvas.discardActiveObject();
+    setHasSelection(false);
+    setIsTextSelected(false);
+    setToolbarPosition(null);
+
+    // Save current side state
+    if (activeSide === 'front') {
+      frontJsonRef.current = canvas.toJSON();
+    } else {
+      backJsonRef.current = canvas.toJSON();
+    }
+
+    // Switch and load or render the target side
+    if (targetSide === 'front') {
+      if (frontJsonRef.current) {
+        await canvas.loadFromJSON(frontJsonRef.current);
+        canvas.renderAll();
+      } else {
+        canvas.clear();
+        canvas.backgroundColor = '#ffffff';
+        setCanvasVersion((v) => v + 1);
+      }
+    } else {
+      if (backJsonRef.current) {
+        await canvas.loadFromJSON(backJsonRef.current);
+        canvas.renderAll();
+      } else {
+        renderBackSide(canvas);
+      }
+    }
+
+    setActiveSide(targetSide);
+  }, [activeSide, canvasInstanceRef, renderBackSide]);
+
+  // Add Back Side to the card
+  const handleAddBackSide = useCallback(async () => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+
+    setHasBackSide(true);
+
+    // Save front side state
+    canvas.discardActiveObject();
+    setHasSelection(false);
+    setIsTextSelected(false);
+    setToolbarPosition(null);
+    frontJsonRef.current = canvas.toJSON();
+
+    // Render back side
+    renderBackSide(canvas);
+    setActiveSide('back');
+  }, [canvasInstanceRef, renderBackSide]);
+
+  // Remove Back Side from the card
+  const handleRemoveBackSide = useCallback(async () => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+
+    // Discard back side state
+    backJsonRef.current = null;
+    setHasBackSide(false);
+
+    // Switch back to front
+    canvas.discardActiveObject();
+    setHasSelection(false);
+    setIsTextSelected(false);
+    setToolbarPosition(null);
+
+    if (frontJsonRef.current) {
+      await canvas.loadFromJSON(frontJsonRef.current);
+      canvas.renderAll();
+    } else {
+      canvas.clear();
+      canvas.backgroundColor = '#ffffff';
+      setCanvasVersion((v) => v + 1);
+    }
+
+    setActiveSide('front');
+  }, [canvasInstanceRef]);
 
   // Synchronize sidebar input changes into the live canvas & record to history
   useEffect(() => {
@@ -448,9 +609,17 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     if (active) {
       canvas.remove(active);
       canvas.discardActiveObject();
+      setHasSelection(false);
+      setIsTextSelected(false);
+      setToolbarPosition(null);
       canvas.renderAll();
       saveHistoryState();
     }
+  };
+
+  const handleCycleAlign = () => {
+    const nextAlign = textAlign === 'left' ? 'center' : textAlign === 'center' ? 'right' : 'left';
+    handleTextAlignChange(nextAlign);
   };
 
   const handleDuplicate = () => {
@@ -545,233 +714,116 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     saveHistoryState();
   };
 
+  // Fit specifically based on Business Card dimensions (1050 × 600 px)
+  const fitBusinessCard = useCallback(() => {
+    if (!containerRef.current) return;
+    const cardWidth = 1050;
+    const cardHeight = 600;
+    const availableW = containerRef.current.clientWidth - 100;
+    // Account for top spacing, thumbnail buttons (~50px), and bottom zoom pill (~50px)
+    const availableH = containerRef.current.clientHeight - 220;
+
+    if (availableW > 0 && availableH > 0) {
+      const scaleX = availableW / cardWidth;
+      const scaleY = availableH / cardHeight;
+      const fitScale = Math.min(scaleX, scaleY);
+      const optimalZoom = Math.min(100, Math.max(30, Math.round(fitScale * 100)));
+      setZoomLevel(optimalZoom);
+    }
+  }, []);
+
+  // Automatically fit Business Card on initial mount and on window resize
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fitBusinessCard();
+    }, 100);
+
+    window.addEventListener('resize', fitBusinessCard);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', fitBusinessCard);
+    };
+  }, [fitBusinessCard]);
+
   const changeZoom = (delta: number) => {
-    setZoomLevel((prev) => Math.min(200, Math.max(50, prev + delta)));
+    setZoomLevel((prev) => Math.min(200, Math.max(30, prev + delta)));
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#f4f4f5] overflow-hidden select-none">
-      {/* Sub-toolbar right above canvas */}
-      <div className="h-10 bg-white border-b border-neutral-200 px-6 flex items-center justify-between">
-        {/* Left tools: Exact Undo & Redo curved arrows matching the reference image */}
-        <div className="flex items-center gap-2">
-          {/* Undo Button */}
-          <button
-            onClick={handleUndo}
-            disabled={!canUndo}
-            className={`w-7 h-7 rounded flex items-center justify-center transition-all ${
-              canUndo
-                ? 'text-neutral-700 hover:text-neutral-900 hover:bg-neutral-100 cursor-pointer active:scale-95'
-                : 'text-neutral-300 cursor-not-allowed opacity-50'
-            }`}
-            title="Undo (Ctrl + Z)"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-            >
-              {/* Arrowhead pointing left */}
-              <path d="M8 5L3 10l5 5" />
-              {/* Stem curving down and right */}
-              <path d="M3 10h11a5 5 0 0 1 5 5v2" />
-            </svg>
-          </button>
-
-          {/* Redo Button */}
-          <button
-            onClick={handleRedo}
-            disabled={!canRedo}
-            className={`w-7 h-7 rounded flex items-center justify-center transition-all ${
-              canRedo
-                ? 'text-neutral-700 hover:text-neutral-900 hover:bg-neutral-100 cursor-pointer active:scale-95'
-                : 'text-neutral-300 cursor-not-allowed opacity-50'
-            }`}
-            title="Redo (Ctrl + Y)"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-            >
-              {/* Arrowhead pointing right */}
-              <path d="M16 5l5 5-5 5" />
-              {/* Stem curving down and left */}
-              <path d="M21 10H10a5 5 0 0 0-5 5v2" />
-            </svg>
-          </button>
-
-          {/* Color swatch picker */}
-          <div className="relative flex items-center ml-2 pl-2 border-l border-neutral-200">
-            <input
-              type="color"
-              value={selectedColor}
-              onChange={(e) => handleColorChange(e.target.value)}
-              className="w-5 h-5 rounded-full border border-neutral-300 cursor-pointer p-0"
-              title="Change element color"
-            />
-          </div>
-
-          {/* Contextual Text Formatting Toolbar (visible when text is selected) */}
-          {isTextSelected && (
-            <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-neutral-200 animate-in fade-in duration-150">
-              {/* Font Family Dropdown */}
-              <FontPickerDropdown
-                currentFont={selectedFont}
-                onSelectFont={handleFontChange}
-              />
-
-              {/* Font Size Controls */}
-              <div className="flex items-center border border-neutral-300 rounded h-7 bg-white">
-                <button
-                  type="button"
-                  onClick={() => handleFontSizeChange(-2)}
-                  className="w-6 h-full flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-l cursor-pointer text-xs font-bold"
-                  title="Decrease font size"
-                >
-                  -
-                </button>
-                <span className="w-8 text-center text-xs font-medium text-neutral-800">
-                  {selectedFontSize}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleFontSizeChange(2)}
-                  className="w-6 h-full flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-r cursor-pointer text-xs font-bold"
-                  title="Increase font size"
-                >
-                  +
-                </button>
-              </div>
-
-              {/* Bold Toggle */}
+    <div className="flex-1 flex flex-col h-full bg-[#eceef2] overflow-hidden select-none relative">
+      {/* Top Header: Front/Back Segmented Switcher & Spec Tag */}
+      <div className="flex items-center justify-between px-6 py-4 z-20">
+        {hasBackSide ? (
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center bg-[#dfe2e8] p-1 rounded-xl shadow-xs">
               <button
                 type="button"
-                onClick={handleToggleBold}
-                className={`w-7 h-7 rounded flex items-center justify-center text-xs font-bold transition-colors cursor-pointer ${
-                  isBold
-                    ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                    : 'text-neutral-700 hover:bg-neutral-100 border border-transparent'
+                onClick={() => handleSwitchSide('front')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeSide === 'front'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Bold"
               >
-                B
+                Front
               </button>
-
-              {/* Italic Toggle */}
               <button
                 type="button"
-                onClick={handleToggleItalic}
-                className={`w-7 h-7 rounded flex items-center justify-center text-xs italic font-serif transition-colors cursor-pointer ${
-                  isItalic
-                    ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                    : 'text-neutral-700 hover:bg-neutral-100 border border-transparent'
+                onClick={() => handleSwitchSide('back')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeSide === 'back'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Italic"
               >
-                I
+                Back
               </button>
-
-              {/* Alignment Controls */}
-              <div className="flex items-center border border-neutral-200 rounded h-7 bg-white p-0.5">
-                <button
-                  type="button"
-                  onClick={() => handleTextAlignChange('left')}
-                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
-                    textAlign === 'left' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
-                  }`}
-                  title="Align Left"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h14" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTextAlignChange('center')}
-                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
-                    textAlign === 'center' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
-                  }`}
-                  title="Align Center"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M5 18h14" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTextAlignChange('right')}
-                  className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
-                    textAlign === 'right' ? 'bg-neutral-200 text-neutral-900' : 'text-neutral-500 hover:bg-neutral-100'
-                  }`}
-                  title="Align Right"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M10 12h10M6 18h14" />
-                  </svg>
-                </button>
-              </div>
             </div>
-          )}
-        </div>
 
-        {/* Right tools: Position, Info, Duplicate, Trash */}
-        <div className="flex items-center gap-3 text-neutral-600 text-xs font-medium">
-          <button className="flex items-center gap-1 px-2 py-1 hover:bg-neutral-100 rounded">
-            <svg className="w-3.5 h-3.5 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-            </svg>
-            <span>Position</span>
-          </button>
-
-          <button className="w-7 h-7 rounded flex items-center justify-center hover:bg-neutral-100 text-neutral-500" title="Lock">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </button>
-
-          <button
-            onClick={handleDuplicate}
-            className="w-7 h-7 rounded flex items-center justify-center hover:bg-neutral-100 text-neutral-500"
-            title="Duplicate selected"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </button>
-
-          {hasSelection && (
+            {/* Remove Back Side Option */}
+            {activeSide === 'back' && (
+              <button
+                type="button"
+                onClick={handleRemoveBackSide}
+                className="px-3 py-1.5 rounded-xl bg-white hover:bg-red-50 border border-slate-200 hover:border-red-200 text-slate-500 hover:text-red-600 text-xs font-medium shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Remove back side from card"
+              >
+                <svg className="w-3.5 h-3.5 text-slate-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>Remove back side</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <div className="bg-[#dfe2e8] p-1 rounded-xl shadow-xs">
+              <span className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-800 shadow-sm inline-block">
+                Front
+              </span>
+            </div>
             <button
-              onClick={handleDelete}
-              className="w-7 h-7 rounded flex items-center justify-center text-red-500 hover:bg-red-50"
-              title="Delete selected"
+              type="button"
+              onClick={handleAddBackSide}
+              className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 hover:text-blue-600 text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Add back side to this card"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+              <span className="text-blue-600 font-bold text-sm leading-none">+</span>
+              <span>Add back side</span>
             </button>
-          )}
+          </div>
+        )}
 
-          <button className="w-7 h-7 rounded flex items-center justify-center hover:bg-neutral-100 text-neutral-400" title="Help">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </button>
+        {/* Top Right: Specifications badge */}
+        <div className="text-xs font-medium text-slate-500 select-none">
+          3.5 × 2 in · 16 pt matte
         </div>
       </div>
 
       {/* Canvas Viewport Container */}
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center p-8 overflow-auto relative"
+        className="flex-1 flex flex-col items-center justify-center p-6 pb-20 overflow-auto relative"
       >
         <div
           style={{
@@ -779,30 +831,128 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
             transformOrigin: 'center center',
             transition: 'transform 0.15s ease',
           }}
-          className="relative p-6 border-2 border-sky-400 rounded bg-white shadow-2xl"
+          className="relative bg-white shadow-2xl rounded-xs select-none"
         >
           <canvas ref={canvasRef} />
+
+          {/* Floating Contextual Popup Toolbar directly above the active element */}
+          {hasSelection && toolbarPosition && (
+            <FloatingElementToolbar
+              position={toolbarPosition}
+              isText={isTextSelected}
+              fontFamily={selectedFont}
+              fontSize={selectedFontSize}
+              isBold={isBold}
+              isItalic={isItalic}
+              textAlign={textAlign}
+              color={selectedColor}
+              onFontChange={handleFontChange}
+              onFontSizeChange={(delta) => handleFontSizeChange(delta)}
+              onToggleBold={handleToggleBold}
+              onToggleItalic={handleToggleItalic}
+              onCycleAlign={handleCycleAlign}
+              onColorChange={handleColorChange}
+              onDelete={handleDelete}
+            />
+          )}
         </div>
+
+        {/* Directly Below Card: Front & Back Miniature Thumbnail Switcher */}
+        {hasBackSide ? (
+          <div className="flex items-center justify-center gap-3 mt-6 mb-12 z-20 select-none">
+            {/* Front Thumbnail */}
+            <button
+              type="button"
+              onClick={() => handleSwitchSide('front')}
+              className={`w-18 h-12 rounded-lg bg-white flex items-end p-2 transition-all cursor-pointer ${
+                activeSide === 'front'
+                  ? 'border-2 border-blue-600 shadow-md ring-2 ring-blue-500/20'
+                  : 'border border-slate-300 hover:border-slate-400 opacity-80 hover:opacity-100 shadow-xs'
+              }`}
+              title="Switch to Front"
+            >
+              <span className="text-[11px] font-bold text-slate-900 leading-none">Front</span>
+            </button>
+
+            {/* Back Thumbnail with Remove Button */}
+            <div className="relative group">
+              <button
+                type="button"
+                onClick={() => handleSwitchSide('back')}
+                className={`w-18 h-12 rounded-lg bg-white flex items-end p-2 transition-all cursor-pointer ${
+                  activeSide === 'back'
+                    ? 'border-2 border-blue-600 shadow-md ring-2 ring-blue-500/20'
+                    : 'border border-slate-300 hover:border-blue-500 opacity-80 hover:opacity-100 shadow-xs'
+                }`}
+                title="Switch to Back"
+              >
+                <span className="text-[11px] font-bold text-slate-900 leading-none">Back</span>
+              </button>
+
+              {/* Remove Back Side Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRemoveBackSide();
+                }}
+                title="Remove back side"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-600 hover:bg-red-600 text-white flex items-center justify-center text-xs shadow-md transition-all hover:scale-110 cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-3 mt-6 mb-12 z-20 select-none">
+            {/* Front Thumbnail */}
+            <div
+              className="w-18 h-12 rounded-lg bg-white flex items-end p-2 border-2 border-blue-600 shadow-md ring-2 ring-blue-500/20"
+              title="Front side (active)"
+            >
+              <span className="text-[11px] font-bold text-slate-900 leading-none">Front</span>
+            </div>
+
+            {/* Add Back Side Button */}
+            <button
+              type="button"
+              onClick={handleAddBackSide}
+              className="h-12 px-4 rounded-lg border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white/70 hover:bg-white text-slate-600 hover:text-blue-600 flex items-center gap-2 text-xs font-semibold shadow-2xs transition-all cursor-pointer group"
+              title="Add back side to this card"
+            >
+              <span className="text-base font-bold text-blue-600 transition-transform group-hover:scale-125">+</span>
+              <span>Add back side</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Bottom Zoom Toolbar */}
-      <div className="h-10 bg-white border-t border-neutral-200 px-4 flex items-center justify-center gap-2 select-none">
+      {/* Bottom Center Floating Zoom Controls */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-white rounded-xl shadow-md border border-slate-200/70 px-4 py-1.5 flex items-center gap-3 select-none">
         <button
           onClick={() => changeZoom(-10)}
-          className="w-7 h-7 rounded flex items-center justify-center text-neutral-600 hover:bg-neutral-100 font-bold"
+          className="w-5 h-5 flex items-center justify-center text-slate-600 hover:text-slate-900 font-bold cursor-pointer transition-colors"
           title="Zoom out"
         >
           -
         </button>
-        <span className="text-xs font-medium text-neutral-700 min-w-12 text-center">
+        <span className="text-xs font-semibold text-slate-700 min-w-10 text-center">
           {zoomLevel}%
         </span>
         <button
           onClick={() => changeZoom(10)}
-          className="w-7 h-7 rounded flex items-center justify-center text-neutral-600 hover:bg-neutral-100 font-bold"
+          className="w-5 h-5 flex items-center justify-center text-slate-600 hover:text-slate-900 font-bold cursor-pointer transition-colors"
           title="Zoom in"
         >
           +
+        </button>
+        <div className="w-px h-3.5 bg-slate-200" />
+        <button
+          onClick={fitBusinessCard}
+          className="text-xs font-semibold text-slate-700 hover:text-blue-600 cursor-pointer transition-colors"
+          title="Fit to screen"
+        >
+          Fit
         </button>
       </div>
     </div>

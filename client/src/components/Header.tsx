@@ -5,8 +5,8 @@ interface HeaderProps {
   templates: DesignTemplate[];
   selectedTemplate: DesignTemplate | null;
   onSelectTemplate: (template: DesignTemplate) => void;
-  activeSide: 'front' | 'back';
-  onToggleSide: () => void;
+  activeSide?: 'front' | 'back';
+  onToggleSide?: () => void;
   onSave: () => void;
   onPreview: () => void;
 }
@@ -15,8 +15,6 @@ export const Header: React.FC<HeaderProps> = ({
   templates,
   selectedTemplate,
   onSelectTemplate,
-  activeSide,
-  onToggleSide,
   onSave,
   onPreview,
 }) => {
@@ -79,14 +77,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right actions */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={onToggleSide}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 shadow-sm transition-all"
-        >
-          <span className="text-neutral-400 text-sm font-bold">+</span>
-          <span>{activeSide === 'front' ? 'Back side' : 'Front side'}</span>
-        </button>
-
         <button
           onClick={onPreview}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 shadow-sm transition-all"
