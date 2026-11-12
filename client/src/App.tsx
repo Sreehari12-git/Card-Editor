@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import * as fabric from 'fabric';
 import { TopNav } from './components/TopNav';
 import { Header } from './components/Header';
@@ -150,23 +151,21 @@ export function App() {
     setUploadedLogos((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // Fetch templates from local NestJS backend
+  // Fetch templates from local NestJS backend using Axios
   useEffect(() => {
-    async function fetchTemplates() {
+    async function loadTemplates() {
       try {
-        const res = await fetch('http://localhost:3001/templates');
-        if (res.ok) {
-          const data: DesignTemplate[] = await res.json();
-          setTemplates(data);
-          if (data.length > 0) {
-            setSelectedTemplate(data[0]);
-          }
+        const response = await axios.get<DesignTemplate[]>('http://localhost:3001/templates');
+        const data = response.data;
+        setTemplates(data);
+        if (data.length > 0) {
+          setSelectedTemplate(data[0]);
         }
       } catch (err) {
-        console.error('Error fetching templates from backend:', err);
+        console.error('Error fetching templates from backend with Axios:', err);
       }
     }
-    fetchTemplates();
+    loadTemplates();
   }, []);
 
   const handleUpdateDetails = (updated: Partial<CardDetails>) => {
