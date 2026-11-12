@@ -9,6 +9,9 @@ interface HeaderProps {
   onToggleSide?: () => void;
   onSave: () => void;
   onPreview: () => void;
+  onPublish: () => void;
+  isPublishing?: boolean;
+  onImportJson?: (data: any) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,6 +20,9 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTemplate,
   onSave,
   onPreview,
+  onPublish,
+  isPublishing = false,
+  onImportJson,
 }) => {
   return (
     <header className="h-14 bg-[#faf8f5] border-b border-neutral-200 px-4 flex items-center justify-between select-none">
@@ -105,7 +111,8 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onSave}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 shadow-sm transition-all"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 shadow-sm transition-all cursor-pointer"
+          title="Save as PNG image"
         >
           <svg
             className="w-3.5 h-3.5 text-neutral-500"
@@ -122,6 +129,73 @@ export const Header: React.FC<HeaderProps> = ({
           </svg>
           <span>Save</span>
         </button>
+
+        {/* Publish Button: Downloads entire card as JSON with vector data & images */}
+        <button
+          onClick={onPublish}
+          disabled={isPublishing}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-400 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+          title="Publish and download entire card as JSON"
+        >
+          <svg
+            className="w-3.5 h-3.5 text-blue-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+            />
+          </svg>
+          <span>{isPublishing ? 'Publishing...' : 'Publish'}</span>
+        </button>
+
+        {/* Import JSON Button: Restores card vector design & images from JSON */}
+        {onImportJson && (
+          <label
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-400 shadow-sm transition-all cursor-pointer"
+            title="Import card from JSON file"
+          >
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  try {
+                    const parsed = JSON.parse(event.target?.result as string);
+                    onImportJson(parsed);
+                  } catch (err) {
+                    console.error('Invalid JSON file', err);
+                    alert('Failed to parse JSON file. Please ensure it is a valid card JSON.');
+                  }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }}
+            />
+            <svg
+              className="w-3.5 h-3.5 text-neutral-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            <span>Import JSON</span>
+          </label>
+        )}
 
         <button
           className="w-8 h-8 rounded-lg border border-neutral-300 bg-white flex items-center justify-center text-neutral-600 hover:bg-neutral-50 shadow-sm"

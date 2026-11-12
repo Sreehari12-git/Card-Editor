@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
-import { CardDetails, DesignTemplate } from '../types';
+import { CardDetails, DesignTemplate, CanvasWorkspaceHandle, CanvasSideData } from '../types';
 import { FloatingElementToolbar } from './FloatingElementToolbar';
-import { applyFontToActiveText } from '../utils/fontLoader';
+import { applyFontToActiveText, ensureFontLoaded } from '../utils/fontLoader';
+import { parseTemplateToFabric } from '../utils/templateParser';
 
 // Rotation icon SVG image loaded for crisp rendering on canvas control
 const rotateIconImg = typeof window !== 'undefined' ? new Image() : null;
@@ -149,15 +150,18 @@ interface CanvasWorkspaceProps {
   selectedTemplate: DesignTemplate | null;
   details: CardDetails;
   canvasInstanceRef: React.MutableRefObject<fabric.Canvas | null>;
+  workspaceRef?: React.MutableRefObject<CanvasWorkspaceHandle | null>;
 }
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   selectedTemplate,
   details,
   canvasInstanceRef,
+  workspaceRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const skipTemplateResetRef = useRef<boolean>(false);
 
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [selectedColor, setSelectedColor] = useState<string>('#1e3a8a');
@@ -202,7 +206,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     if (!canvas || isHistoryProcessing.current) return;
 
     try {
-      const json = JSON.stringify(canvas.toJSON());
+      const json = JSON.stringify((canvas as any).toObject(['name']));
 
       // Avoid pushing identical duplicate consecutive states
       if (
@@ -441,25 +445,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     return star;
   }, []);
 
-  // Re-render template layout whenever selectedTemplate changes or a new canvas is mounted
-  useEffect(() => {
-    const canvas = canvasInstanceRef.current;
-    if (!canvas) return;
-
-    // Reset selection & toolbar to prevent ghost floating toolbars on remount
-    setHasSelection(false);
-    setIsTextSelected(false);
-    setToolbarPosition(null);
-
-    isHistoryProcessing.current = true;
-    canvas.clear();
-    canvas.backgroundColor = '#ffffff';
-    textObjectMap.current = {};
-
-    const width = selectedTemplate?.widthPx || 1050;
-    const height = selectedTemplate?.heightPx || 600;
-
-    canvas.setDimensions({ width, height });
+  // Generate standard fallback card elements if template has no Polotno design
+  const createDefaultTemplateObjects = useCallback(() => {
+    const textMap: { [key: string]: fabric.Textbox } = {};
 
     // 1. Logo
     const logoObj = new fabric.Textbox(details.logoText || 'Logo', {
@@ -472,7 +460,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       fill: '#1e293b',
       selectable: true,
     });
-    textObjectMap.current['logoText'] = logoObj;
+    (logoObj as any).name = 'logoText';
+    textMap['logoText'] = logoObj;
 
     // 2. Star Emblem
     const starObj = createStarEmblem();
@@ -488,7 +477,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       fill: '#1e3a8a',
       selectable: true,
     });
-    textObjectMap.current['fullName'] = nameObj;
+    (nameObj as any).name = 'fullName';
+    textMap['fullName'] = nameObj;
 
     // 4. Tagline / Profession
     const taglineObj = new fabric.Textbox(
@@ -504,7 +494,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         selectable: true,
       },
     );
-    textObjectMap.current['tagline'] = taglineObj;
+    (taglineObj as any).name = 'tagline';
+    textMap['tagline'] = taglineObj;
 
     // 5. Specialty
     const specialtyObj = new fabric.Textbox('Tagline / specialty', {
@@ -528,7 +519,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       fill: '#334155',
       selectable: true,
     });
-    textObjectMap.current['phone'] = phoneObj;
+    (phoneObj as any).name = 'phone';
+    textMap['phone'] = phoneObj;
 
     const emailObj = new fabric.Textbox(details.email || 'ncoder08@gmail.com', {
       left: 70,
@@ -539,7 +531,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       fill: '#334155',
       selectable: true,
     });
-    textObjectMap.current['email'] = emailObj;
+    (emailObj as any).name = 'email';
+    textMap['email'] = emailObj;
 
     const websiteObj = new fabric.Textbox(details.website || 'Website', {
       left: 70,
@@ -550,29 +543,91 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       fill: '#0284c7',
       selectable: true,
     });
-    textObjectMap.current['website'] = websiteObj;
+    (websiteObj as any).name = 'website';
+    textMap['website'] = websiteObj;
 
-    canvas.add(
-      logoObj,
-      starObj,
-      nameObj,
-      taglineObj,
-      specialtyObj,
-      phoneObj,
-      emailObj,
-      websiteObj,
-    );
+    return {
+      objects: [
+        logoObj,
+        starObj,
+        nameObj,
+        taglineObj,
+        specialtyObj,
+        phoneObj,
+        emailObj,
+        websiteObj,
+      ],
+      backgroundColor: '#ffffff',
+      textObjectMap: textMap,
+    };
+  }, [details, createStarEmblem]);
 
-    canvas.renderAll();
+  // Render front template (converts Polotno template if available, else uses default layout)
+  const renderFrontTemplate = useCallback(
+    async (canvas: fabric.Canvas) => {
+      isHistoryProcessing.current = true;
+      canvas.discardActiveObject();
+      setHasSelection(false);
+      setIsTextSelected(false);
+      setToolbarPosition(null);
 
-    // Initialize the baseline history state
-    const initialJson = JSON.stringify(canvas.toJSON());
-    history.current = [initialJson];
-    historyIndex.current = 0;
-    setCanUndo(false);
-    setCanRedo(false);
-    isHistoryProcessing.current = false;
-  }, [selectedTemplate, canvasVersion]);
+      const width = selectedTemplate?.widthPx || 1050;
+      const height = selectedTemplate?.heightPx || 600;
+      canvas.setDimensions({ width, height });
+
+      let templateData: {
+        objects: fabric.FabricObject[];
+        backgroundColor: string;
+        textObjectMap: { [key: string]: fabric.Textbox };
+      } | null = null;
+
+      if (selectedTemplate?.polotnoJson?.pages?.[0]?.children?.length) {
+        try {
+          templateData = await parseTemplateToFabric(selectedTemplate, details);
+        } catch (err) {
+          console.warn('Failed to parse Polotno template, using fallback layout:', err);
+        }
+      }
+
+      if (!templateData || templateData.objects.length === 0) {
+        templateData = createDefaultTemplateObjects();
+      }
+
+      canvas.clear();
+      canvas.backgroundColor = templateData.backgroundColor;
+      textObjectMap.current = templateData.textObjectMap;
+
+      templateData.objects.forEach((obj) => canvas.add(obj));
+      canvas.renderAll();
+
+      const json = (canvas as any).toObject(['name']);
+      frontJsonRef.current = json;
+      history.current = [JSON.stringify(json)];
+      historyIndex.current = 0;
+      setCanUndo(false);
+      setCanRedo(false);
+      isHistoryProcessing.current = false;
+    },
+    [selectedTemplate, details, createDefaultTemplateObjects]
+  );
+
+  // Re-render template layout whenever selectedTemplate changes or a new canvas is mounted
+  useEffect(() => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) return;
+
+    if (skipTemplateResetRef.current) {
+      skipTemplateResetRef.current = false;
+      return;
+    }
+
+    // When template changes, reset to front side view
+    setActiveSide('front');
+    backJsonRef.current = null;
+    setHasBackSide(false);
+
+    renderFrontTemplate(canvas);
+  }, [selectedTemplate, canvasVersion, renderFrontTemplate]);
 
   // Render Back Side Card with default white color
   const renderBackSide = useCallback((canvas: fabric.Canvas) => {
@@ -660,43 +715,44 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   }, [selectedTemplate, details]);
 
   // Handle switching between Front and Back of the card
-  const handleSwitchSide = useCallback(async (targetSide: 'front' | 'back') => {
-    const canvas = canvasInstanceRef.current;
-    if (!canvas || activeSide === targetSide) return;
+  const handleSwitchSide = useCallback(
+    async (targetSide: 'front' | 'back') => {
+      const canvas = canvasInstanceRef.current;
+      if (!canvas || activeSide === targetSide) return;
 
-    canvas.discardActiveObject();
-    setHasSelection(false);
-    setIsTextSelected(false);
-    setToolbarPosition(null);
+      canvas.discardActiveObject();
+      setHasSelection(false);
+      setIsTextSelected(false);
+      setToolbarPosition(null);
 
-    // Save current side state
-    if (activeSide === 'front') {
-      frontJsonRef.current = canvas.toJSON();
-    } else {
-      backJsonRef.current = canvas.toJSON();
-    }
-
-    // Switch and load or render the target side
-    if (targetSide === 'front') {
-      if (frontJsonRef.current) {
-        await canvas.loadFromJSON(frontJsonRef.current);
-        canvas.renderAll();
+      // Save current side state
+      if (activeSide === 'front') {
+        frontJsonRef.current = (canvas as any).toObject(['name']);
       } else {
-        canvas.clear();
-        canvas.backgroundColor = '#ffffff';
-        setCanvasVersion((v) => v + 1);
+        backJsonRef.current = (canvas as any).toObject(['name']);
       }
-    } else {
-      if (backJsonRef.current) {
-        await canvas.loadFromJSON(backJsonRef.current);
-        canvas.renderAll();
-      } else {
-        renderBackSide(canvas);
-      }
-    }
 
-    setActiveSide(targetSide);
-  }, [activeSide, canvasInstanceRef, renderBackSide]);
+      // Switch and load or render the target side
+      if (targetSide === 'front') {
+        if (frontJsonRef.current) {
+          await canvas.loadFromJSON(frontJsonRef.current);
+          canvas.renderAll();
+        } else {
+          await renderFrontTemplate(canvas);
+        }
+      } else {
+        if (backJsonRef.current) {
+          await canvas.loadFromJSON(backJsonRef.current);
+          canvas.renderAll();
+        } else {
+          renderBackSide(canvas);
+        }
+      }
+
+      setActiveSide(targetSide);
+    },
+    [activeSide, canvasInstanceRef, renderBackSide, renderFrontTemplate]
+  );
 
   // Add Back Side to the card
   const handleAddBackSide = useCallback(async () => {
@@ -710,7 +766,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     setHasSelection(false);
     setIsTextSelected(false);
     setToolbarPosition(null);
-    frontJsonRef.current = canvas.toJSON();
+    frontJsonRef.current = (canvas as any).toObject(['name']);
 
     // Render back side
     renderBackSide(canvas);
@@ -736,13 +792,163 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       await canvas.loadFromJSON(frontJsonRef.current);
       canvas.renderAll();
     } else {
-      canvas.clear();
-      canvas.backgroundColor = '#ffffff';
-      setCanvasVersion((v) => v + 1);
+      await renderFrontTemplate(canvas);
     }
 
     setActiveSide('front');
-  }, [canvasInstanceRef]);
+  }, [canvasInstanceRef, renderFrontTemplate]);
+
+  // Expose entire card data (both front and back sides + rendered PNG images)
+  const getCardCanvasData = useCallback(async (): Promise<CanvasSideData> => {
+    const canvas = canvasInstanceRef.current;
+    if (!canvas) {
+      return {
+        front: null,
+        back: null,
+        hasBackSide,
+        activeSide,
+        frontImage: null,
+        backImage: null,
+      };
+    }
+
+    // Save active side current state
+    const currentJson = (canvas as any).toObject(['name']);
+    const currentDataUrl = canvas.toDataURL({
+      format: 'png',
+      multiplier: 2,
+    });
+
+    let frontJson = activeSide === 'front' ? currentJson : frontJsonRef.current;
+    let backJson = activeSide === 'back' ? currentJson : backJsonRef.current;
+
+    let frontImage: string | null = activeSide === 'front' ? currentDataUrl : null;
+    let backImage: string | null = activeSide === 'back' ? currentDataUrl : null;
+
+    const renderSideToDataUrl = async (sideJson: any): Promise<string | null> => {
+      if (!sideJson) return null;
+      try {
+        const tempEl = document.createElement('canvas');
+        const w = sideJson.width || canvas.getWidth() || 1050;
+        const h = sideJson.height || canvas.getHeight() || 600;
+        tempEl.width = w;
+        tempEl.height = h;
+        const tempCanvas = new fabric.Canvas(tempEl, { width: w, height: h });
+        if (sideJson.objects && Array.isArray(sideJson.objects)) {
+          for (const obj of sideJson.objects) {
+            if (obj.fontFamily) {
+              await ensureFontLoaded(obj.fontFamily, obj.fontWeight || 400);
+            }
+          }
+        }
+        await tempCanvas.loadFromJSON(sideJson);
+        tempCanvas.renderAll();
+        const url = tempCanvas.toDataURL({ format: 'png', multiplier: 2 });
+        tempCanvas.dispose();
+        return url;
+      } catch (err) {
+        console.warn('Could not render offscreen canvas side:', err);
+        return null;
+      }
+    };
+
+    if (!frontImage && frontJson) {
+      frontImage = await renderSideToDataUrl(frontJson);
+    }
+
+    if (hasBackSide && !backImage && backJson) {
+      backImage = await renderSideToDataUrl(backJson);
+    }
+
+    return {
+      front: frontJson,
+      back: hasBackSide ? backJson : null,
+      hasBackSide,
+      activeSide,
+      frontImage,
+      backImage: hasBackSide ? backImage : null,
+    };
+  }, [activeSide, hasBackSide, canvasInstanceRef]);
+
+  // Load imported card data into the canvas
+  const loadCardCanvasData = useCallback(
+    async (canvasData: {
+      front: any;
+      back: any | null;
+      hasBackSide: boolean;
+    }) => {
+      const canvas = canvasInstanceRef.current;
+      if (!canvas) return;
+
+      isHistoryProcessing.current = true;
+      skipTemplateResetRef.current = true;
+
+      canvas.discardActiveObject();
+      setHasSelection(false);
+      setIsTextSelected(false);
+      setToolbarPosition(null);
+
+      const hasBack = !!canvasData.hasBackSide || !!canvasData.back;
+      setHasBackSide(hasBack);
+      frontJsonRef.current = canvasData.front;
+      backJsonRef.current = canvasData.back || null;
+
+      // Preload fonts for front objects
+      if (canvasData.front?.objects && Array.isArray(canvasData.front.objects)) {
+        for (const obj of canvasData.front.objects) {
+          if (obj.fontFamily) {
+            await ensureFontLoaded(obj.fontFamily, obj.fontWeight || 400);
+          }
+        }
+      }
+
+      if (canvasData.front) {
+        if (canvasData.front.width && canvasData.front.height) {
+          canvas.setDimensions({
+            width: canvasData.front.width,
+            height: canvasData.front.height,
+          });
+        }
+        await canvas.loadFromJSON(canvasData.front);
+        canvas.renderAll();
+
+        // Reconnect textObjectMap references
+        textObjectMap.current = {};
+        canvas.getObjects().forEach((obj) => {
+          const name = (obj as any).name;
+          if (name && obj instanceof fabric.Textbox) {
+            textObjectMap.current[name] = obj;
+          }
+        });
+      }
+
+      setActiveSide('front');
+
+      // Reset history to loaded state
+      const initialJson = JSON.stringify(canvas.toJSON());
+      history.current = [initialJson];
+      historyIndex.current = 0;
+      setCanUndo(false);
+      setCanRedo(false);
+      isHistoryProcessing.current = false;
+    },
+    [canvasInstanceRef],
+  );
+
+  // Bind methods to workspaceRef
+  useEffect(() => {
+    if (workspaceRef) {
+      workspaceRef.current = {
+        getCardCanvasData,
+        loadCardCanvasData,
+      };
+    }
+    return () => {
+      if (workspaceRef) {
+        workspaceRef.current = null;
+      }
+    };
+  }, [workspaceRef, getCardCanvasData, loadCardCanvasData]);
 
   // Synchronize sidebar input changes into the live canvas & record to history
   useEffect(() => {

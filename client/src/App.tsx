@@ -6,7 +6,7 @@ import { SidebarRail } from './components/SidebarRail';
 import { DetailsPanel } from './components/DetailsPanel';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { PreviewModal } from './components/PreviewModal';
-import { CardDetails, DesignTemplate, PRODUCTS, SidebarTab, UploadedGraphic } from './types';
+import { CardDetails, DesignTemplate, PRODUCTS, SidebarTab, UploadedGraphic, CanvasWorkspaceHandle, CardExportPayload } from './types';
 import { ensureFontLoaded, applyFontToActiveText } from './utils/fontLoader';
 
 export function App() {
@@ -31,6 +31,9 @@ export function App() {
   });
 
   const canvasInstanceRef = useRef<fabric.Canvas | null>(null);
+  const workspaceRef = useRef<CanvasWorkspaceHandle | null>(null);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Uploaded Logos state persisted in localStorage
   const [uploadedLogos, setUploadedLogos] = useState<UploadedGraphic[]>(() => {
@@ -275,9 +278,199 @@ export function App() {
       multiplier: 2,
     });
     const link = document.createElement('a');
-    link.download = `${selectedTemplate?.slug || 'card-design'}-${activeSide}.png`;
     link.href = dataUrl;
+    link.download = `${selectedTemplate?.slug || 'card-design'}-${activeSide}.png`;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
+  };
+
+  // Publish card as a complete downloadable JSON package (vector canvas + rendered PNG images + metadata)
+  const handlePublish = async () => {
+    try {
+      setIsPublishing(true);
+
+      let canvasData = null;
+      if (workspaceRef.current) {
+        canvasData = await workspaceRef.current.getCardCanvasData();
+      } else if (canvasInstanceRef.current) {
+        const canvas = canvasInstanceRef.current;
+        canvasData = {
+          front: canvas.toJSON(),
+          back: null,
+          hasBackSide: false,
+          activeSide: 'front' as const,
+          frontImage: canvas.toDataURL({ format: 'png', multiplier: 2 }),
+          backImage: null,
+        };
+      }
+
+      const activeProduct = PRODUCTS.find((p) => p.id === selectedProductId);
+
+      const exportPayload: CardExportPayload = {
+        app: 'gnapi-card-editor',
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        product: {
+          id: selectedProductId,
+          name: activeProduct?.name || 'Business card',
+          subtitle: activeProduct?.subtitle || '3.5 × 2 in',
+          dimensions: {
+            widthPx: selectedTemplate?.widthPx || activeProduct?.widthPx || 1050,
+            heightPx: selectedTemplate?.heightPx || activeProduct?.heightPx || 600,
+            dpi: selectedTemplate?.dpi || 300,
+          },
+        },
+        template: {
+          id: selectedTemplate?.id || selectedProductId,
+          name: selectedTemplate?.name || 'Custom Card',
+          slug: selectedTemplate?.slug || 'card-design',
+        },
+        details,
+        images: {
+          front: canvasData?.frontImage || null,
+          back: canvasData?.backImage || null,
+        },
+        canvas: {
+          hasBackSide: !!canvasData?.hasBackSide,
+          activeSide: canvasData?.activeSide || 'front',
+          front: canvasData?.front || null,
+          back: canvasData?.back || null,
+        },
+      };
+
+      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeName = (
+        details.fullName
+          ? `${details.fullName}-card`
+          : selectedTemplate?.slug || 'card-design'
+      )
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '-');
+
+      link.href = url;
+      link.download = `${safeName}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Revoke the object URL after allowing the browser time to initiate download
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1500);
+
+      setToastMessage('Card JSON published & downloaded! Can be re-imported or converted to image anytime.');
+      setTimeout(() => setToastMessage(null), 4500);
+    } catch (err: any) {
+      console.error('Failed to publish card as JSON:', err);
+      alert(`Publish failed: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  // Import card back from a published JSON file and auto-download as PNG
+  const handleImportJson = async (data: any) => {
+    try {
+      if (!data) throw new Error('Empty JSON data file');
+
+      // 1. Restore Details if present
+      if (data.details) {
+        setDetails((prev) => ({ ...prev, ...data.details }));
+      }
+
+      // 2. Restore Product / Dimensions if present
+      if (data.product?.id) {
+        setSelectedProductId(data.product.id);
+      }
+
+      // 3. Restore Template if present
+      if (data.template) {
+        setSelectedTemplate((prev) => ({
+          id: data.template.id || prev?.id || 'imported-card',
+          slug: data.template.slug || prev?.slug || 'imported-card',
+          name: data.template.name || prev?.name || 'Imported Card',
+          categoryId: prev?.categoryId || null,
+          countryCode: prev?.countryCode || null,
+          style: prev?.style || null,
+          widthPx: data.product?.dimensions?.widthPx || prev?.widthPx || 1050,
+          heightPx: data.product?.dimensions?.heightPx || prev?.heightPx || 600,
+          dpi: data.product?.dimensions?.dpi || prev?.dpi || 300,
+          polotnoJson: null,
+          editableVariables: null,
+          isSystemTemplate: false,
+          isActive: true,
+        }));
+      }
+
+      // 4. Restore Canvas Objects
+      const canvasPayload = data.canvas
+        ? {
+            front: data.canvas.front,
+            back: data.canvas.back,
+            hasBackSide: !!data.canvas.hasBackSide,
+          }
+        : data.objects
+        ? {
+            front: data,
+            back: null,
+            hasBackSide: false,
+          }
+        : null;
+
+      if (canvasPayload && workspaceRef.current) {
+        await workspaceRef.current.loadCardCanvasData(canvasPayload);
+      } else if (canvasPayload && canvasInstanceRef.current) {
+        await canvasInstanceRef.current.loadFromJSON(canvasPayload.front);
+        canvasInstanceRef.current.renderAll();
+      }
+
+      // 5. Automatically download as PNG
+      const targetName = (
+        data.details?.fullName ||
+        data.template?.name ||
+        data.template?.slug ||
+        'card-design'
+      )
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '-');
+
+      const frontUrl =
+        data.images?.front ||
+        (canvasInstanceRef.current
+          ? canvasInstanceRef.current.toDataURL({ format: 'png', multiplier: 2 })
+          : null);
+
+      if (frontUrl) {
+        const link = document.createElement('a');
+        link.href = frontUrl;
+        link.download = `${targetName}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      if (data.images?.back) {
+        setTimeout(() => {
+          const backLink = document.createElement('a');
+          backLink.href = data.images.back;
+          backLink.download = `${targetName}-back.png`;
+          document.body.appendChild(backLink);
+          backLink.click();
+          document.body.removeChild(backLink);
+        }, 300);
+      }
+
+      setToastMessage('Card imported & downloaded as PNG!');
+      setTimeout(() => setToastMessage(null), 4500);
+    } catch (err: any) {
+      console.error('Failed to import card JSON:', err);
+      alert(`Could not import card JSON: ${err?.message || 'Invalid format'}`);
+    }
   };
 
   // Open Preview Modal with high-res render of current canvas
@@ -306,6 +499,9 @@ export function App() {
         onToggleSide={() => setActiveSide((prev) => (prev === 'front' ? 'back' : 'front'))}
         onSave={handleExport}
         onPreview={handleOpenPreview}
+        onPublish={handlePublish}
+        isPublishing={isPublishing}
+        onImportJson={handleImportJson}
       />
 
       {/* Main Studio Workspace */}
@@ -335,6 +531,7 @@ export function App() {
           selectedTemplate={selectedTemplate}
           details={details}
           canvasInstanceRef={canvasInstanceRef}
+          workspaceRef={workspaceRef}
         />
       </div>
 
@@ -345,6 +542,22 @@ export function App() {
         imageUrl={previewImageUrl}
         side={activeSide === 'front' ? 'Front' : 'Back'}
       />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-2.5 bg-slate-900 text-white text-xs font-medium rounded-xl shadow-2xl border border-slate-700">
+          <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span>{toastMessage}</span>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="ml-2 text-slate-400 hover:text-white cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

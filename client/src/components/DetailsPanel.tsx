@@ -511,8 +511,8 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
         </div>
       )}
 
-      {/* Colours / Background tab */}
-      {(activeTab === 'colours' || activeTab === 'background') && (
+      {/* Background tab */}
+      {activeTab === 'background' && (
         <div className="p-5 flex flex-col gap-3">
           <h2 className="text-base font-bold text-neutral-900">Card Background</h2>
           <div className="grid grid-cols-4 gap-2">

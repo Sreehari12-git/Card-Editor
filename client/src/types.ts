@@ -99,7 +99,6 @@ export type SidebarTab =
   | 'text'
   | 'graphics'
   | 'qrcode'
-  | 'colours'
   | 'background'
   | 'layers';
 
@@ -111,4 +110,55 @@ export interface UploadedGraphic {
   svgContent?: string;
   createdAt: number;
 }
+
+export interface CanvasSideData {
+  front: any;
+  back: any | null;
+  hasBackSide: boolean;
+  activeSide: 'front' | 'back';
+  frontImage: string | null;
+  backImage: string | null;
+}
+
+export interface CanvasWorkspaceHandle {
+  getCardCanvasData: () => Promise<CanvasSideData>;
+  loadCardCanvasData: (canvasData: {
+    front: any;
+    back: any | null;
+    hasBackSide: boolean;
+  }) => Promise<void>;
+}
+
+export interface CardExportPayload {
+  app: string;
+  version: string;
+  exportedAt: string;
+  product: {
+    id: string;
+    name: string;
+    subtitle: string;
+    dimensions: {
+      widthPx: number;
+      heightPx: number;
+      dpi: number;
+    };
+  };
+  template: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  details: CardDetails;
+  images: {
+    front: string | null;
+    back: string | null;
+  };
+  canvas: {
+    hasBackSide: boolean;
+    activeSide: 'front' | 'back';
+    front: any;
+    back: any | null;
+  };
+}
+
 

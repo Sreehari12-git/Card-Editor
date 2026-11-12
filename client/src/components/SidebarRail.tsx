@@ -81,20 +81,6 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
       ),
     },
     {
-      id: 'colours',
-      label: 'Colours',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.75}
-            d="M7 21a4 4 0 01-4-4 5 5 0 015-5 4 4 0 014 4 5 5 0 01-5 5zm0 0h10a2 2 0 002-2v-4a2 2 0 00-2-2h-3.5a1.5 1.5 0 01-1.5-1.5V7a2 2 0 00-2-2H8a2 2 0 00-2 2v2"
-          />
-        </svg>
-      ),
-    },
-    {
       id: 'background',
       label: 'Background',
       icon: (
